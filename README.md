@@ -30,11 +30,15 @@ Windows x64 便携版在 [Releases](../../releases) 页面下载。完整解压 
 
 ## 第一次使用
 
+![8fqSZkRc3M6SMrLtDpaywVjTBlpWEoU9.webp](https://cdn.nodeimage.com/i/8fqSZkRc3M6SMrLtDpaywVjTBlpWEoU9.webp)
+
 首次启动时设置至少 12 个字符的主密码；它用于加密本地资料，不是 SSH 或 WebDAV 密码，请认真保管。
 
 点击“新建连接”，填写服务器地址、端口、SSH 用户名、密码或可导出的 SSH 私钥，以及分组、所在地和备注。需要跳板机时，先保存可直连的跳板连接，再在目标服务器中选择它。首次连接请核对 SHA-256 主机指纹；指纹变化时先确认服务器确实轮换了密钥。
 
 ## WebDAV 加密同步
+
+![AqNZn8dSVxspsyBCLlXAgLW0yC6SXIw8.webp](https://cdn.nodeimage.com/i/AqNZn8dSVxspsyBCLlXAgLW0yC6SXIw8.webp)
 
 SyncSSH 先在本地加密，再通过 WebDAV 同步。远端只能看到仓库标识、随机修订文件名、大小和访问时间；服务器资料、密码、私钥和备忘录内容都经过加密保护。
 
@@ -45,6 +49,10 @@ SyncSSH 先在本地加密，再通过 WebDAV 同步。远端只能看到仓库�
 WebDAV 需要支持 `GET`、`PUT`、`MKCOL`、`PROPFIND`（Depth 1）、`DELETE` 和带 `Overwrite: F` 的 `MOVE`。建议 HTTPS，反向代理需要保留 `Destination` 请求头。
 
 ## SFTP、备忘录与监控
+
+![mzkF7q6NIvJQUyz3ehJEl0JxOlXmEXqo.webp](https://cdn.nodeimage.com/i/mzkF7q6NIvJQUyz3ehJEl0JxOlXmEXqo.webp)
+
+![7rqJFRRjKzfUiQLyURyLZucPRXgTOXw3.webp](https://cdn.nodeimage.com/i/7rqJFRRjKzfUiQLyURyLZucPRXgTOXw3.webp)
 
 SFTP 支持根目录、新建文件/文件夹、传输、重命名、权限、过滤和不超过 2 MiB 的 UTF-8 文本编辑；目录下载会跳过符号链接和 Windows 不兼容文件名。保存前会检查远端是否已被他人修改，文明运维，从我做起。
 
