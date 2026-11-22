@@ -1,0 +1,200 @@
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: 'self'; font-src 'self'; media-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+  <title>SyncSSH</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script defer src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script defer src="../node_modules/marked/lib/marked.umd.js"></script>
+  <script defer src="../node_modules/dompurify/dist/purify.min.js"></script>
+  <script defer src="renderer.js"></script>
+  <script defer src="files.js"></script>
+  <script defer src="notes.js"></script>
+  <script defer src="desktop-tools.js"></script>
+  <script defer src="terminal-tools.js"></script>
+</head>
+<body>
+  <div id="workspace" inert>
+    <header class="appbar">
+      <div class="brand"><span class="brand-symbol" aria-hidden="true">›_</span> SyncSSH <button id="alarm-countdown" hidden>⏰ 倒计时</button></div>
+      <time id="system-clock" aria-label="本机时间"></time>
+      <div class="app-actions">
+        <button id="sync-now" title="立即同步">↻ 同步</button>
+        <button id="settings" title="WebDAV 同步设置">同步设置</button>
+      </div>
+    </header>
+    <main class="work-grid">
+      <aside class="sidebar">
+        <nav aria-label="侧栏" class="rail">
+          <button data-panel="servers" title="服务器" aria-label="服务器" aria-pressed="true"><span class="server-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>
+          <button data-panel="status" title="状态" aria-label="状态" aria-pressed="false">◉</button>
+          <button data-panel="notes" title="备忘录" aria-label="备忘录" aria-pressed="false">▧</button>
+          <button data-panel="monitor-panel" title="所有服务器状态监控" aria-label="所有服务器状态监控" aria-pressed="false">▥</button>
+        </nav>
+        <section class="side-content">
+          <div id="servers" class="side-panel">
+            <div class="section-title"><h1>服务器</h1></div>
+            <label class="sr-only" for="server-search">搜索服务器</label>
+            <input type="search" id="server-search" placeholder="搜索服务器">
+            <div id="server-list" class="side-scroll"></div>
+            <div class="sidebar-create"><button id="add-server" class="primary">＋ 新建连接</button><button id="add-group" class="primary">＋ 分组</button></div>
+          </div>
+          <div id="status" class="side-panel" hidden>
+            <div class="section-title"><h1>状态</h1></div>
+            <div id="status-detail" class="side-scroll"></div>
+            <button id="show-pins">主机指纹</button>
+          </div>
+          <div id="notes" class="side-panel" hidden>
+            <div class="section-title"><h1>备忘录</h1><span class="note-actions"><button id="note-preview" class="small">预览</button><button id="note-export" class="small">导出为 HTML</button></span></div>
+            <label class="sr-only" for="note-host">备忘录所属服务器</label>
+            <select id="note-host"></select>
+            <label class="sr-only" for="note-text">Markdown 备忘录</label>
+            <textarea id="note-text" placeholder="输入 Markdown，或粘贴截图" spellcheck="false"></textarea>
+            <div id="note-render" class="markdown side-scroll" hidden></div>
+            <button id="note-save">保存备忘录</button>
+          </div>
+          <div id="monitor-panel" class="side-panel" hidden>
+            <div class="section-title"><h1>服务器监控</h1></div>
+            <div id="monitor-list" class="side-scroll"></div>
+          </div>
+        </section>
+        <button id="options-menu" class="sidebar-options" aria-label="选项">⚙ 选项 <span aria-hidden="true">▴</span></button>
+      </aside>
+      <div class="work-pane">
+        <section class="upper" aria-label="会话与远程编辑">
+          <div class="tabs-bar">
+            <nav class="tabs" id="tabs" aria-label="会话标签"></nav>
+            <button id="split" class="small" hidden>编辑器分屏</button>
+            <button id="append" class="small" disabled>选区追加到备忘录</button>
+          </div>
+          <div id="session-area">
+            <div id="terminals">
+              <div id="terminal-empty" class="empty terminal-empty">
+                <span class="empty-symbol" aria-hidden="true">›_</span>
+                <h2>打开 SSH 会话</h2>
+                <p>从左侧选择一台服务器连接。</p>
+                <button id="empty-add" class="primary">新建连接</button>
+              </div>
+            </div>
+            <div id="editor" hidden>
+              <div class="editor-bar">
+                <span id="editor-title"></span>
+                <span class="editor-actions"><button id="save-file" class="primary small">保存</button><button id="close-file" class="small">关闭</button></span>
+              </div>
+              <div id="editor-buffers"></div>
+            </div>
+          </div>
+          <div id="terminal-tools" hidden>
+            <div id="terminal-tools-bar">
+              <button id="tool-handle" title="拖动终端工具" aria-label="拖动终端工具">⠿</button>
+              <button id="batch-open" title="多行命令" aria-label="多行命令">›_</button>
+              <button id="history-open" title="最近 20 条命令" aria-label="最近 20 条命令">◷</button>
+              <button id="clear-terminal" title="清屏" aria-label="清屏">⌫</button>
+            </div>
+            <div id="terminal-tool-panel" hidden></div>
+          </div>
+        </section>
+        <div id="pane-divider" role="separator" tabindex="0" aria-label="调整终端和文件区高度" aria-orientation="horizontal"></div>
+        <section class="files" aria-label="SFTP 文件">
+          <div class="files-title">
+            <h2>SFTP 文件</h2><span id="sftp-server" class="muted"></span>
+            <label class="follow" title="需要远程终端发送 OSC 7 目录通知"><input type="checkbox" id="follow"> 跟随终端目录</label>
+          </div>
+          <div class="file-tools">
+            <button id="root-dir" title="根目录" aria-label="根目录">/</button>
+            <button id="up" title="上一级" aria-label="上一级">↑</button>
+            <form id="path-form"><input aria-label="远程路径" id="sftp-path" placeholder="远程路径"></form>
+            <button id="refresh" title="刷新" aria-label="刷新文件">↻</button>
+            <button id="mkdir">新建目录</button>
+            <button id="mkfile">新建文件</button>
+            <button id="upload">上传</button>
+            <button id="download">下载</button>
+            <button id="sftp-more">更多</button>
+            <input type="search" aria-label="搜索当前目录" id="file-search" placeholder="搜索当前目录">
+          </div>
+          <div class="file-layout">
+            <div id="tree" aria-label="远程目录树"></div>
+            <div class="file-table">
+              <table><thead><tr><th>名称</th><th>大小</th><th>修改时间</th></tr></thead><tbody id="file-rows"></tbody></table>
+              <div id="file-message" class="empty muted">连接服务器后浏览远程文件。</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer class="status-bar"><span id="footer-ssh">● 未连接</span><span id="notification" role="status"></span><span id="footer-sync">本地加密</span></footer>
+  </div>
+  <dialog id="dialog"></dialog>
+  <dialog id="trust-dialog" aria-labelledby="trust-title"></dialog>
+  <dialog id="rest-dialog" aria-labelledby="rest-title"><h1 id="rest-title">休息一下</h1><p id="rest-remaining"></p><button id="rest-skip">跳过休息（Esc）</button></dialog>
+  <audio id="alarm-sound" src="alarm.wav" preload="auto"></audio>
+  <div id="alarm-toast" role="alert" hidden><p>⏰ 闹钟时间到了</p><button id="alarm-dismiss">关闭提醒</button></div>
+  <div id="popup-menu" role="menu" hidden></div>
+  <template id="account-form">
+    <div class="modal-brand"><span class="brand-symbol">›_</span> SyncSSH</div>
+    <h1 data-account-title></h1>
+    <p class="muted" data-account-info></p>
+    <form class="dialog-form">
+      <div data-dav-fields hidden></div>
+      <label>仓库主密码<input name="master" type="password" autocomplete="off" required minlength="12" maxlength="1024"></label>
+      <label data-confirm>确认主密码<input name="confirm" type="password" autocomplete="off"></label>
+      <div class="dialog-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button type="button" data-switch></button>
+        <button class="primary" data-account-submit></button>
+      </div>
+    </form>
+  </template>
+  <template id="dav-fields">
+    <label>WebDAV 地址<input name="url" placeholder="https://example.com/dav/" maxlength="2048" required></label>
+    <div class="field-grid">
+      <label>WebDAV 用户名<input name="username" autocomplete="off"></label>
+      <label>WebDAV 密码<input name="password" type="password" autocomplete="off"></label>
+    </div>
+    <div class="field-grid">
+      <label>定时同步间隔（分钟）<input type="number" name="minutes" value="5" min="0" max="1440" required></label>
+      <label class="checkbox"><input type="checkbox" name="onChange" checked>变更后自动同步</label>
+    </div>
+    <p class="muted helper">间隔为 0 时关闭定时同步。</p>
+  </template>
+  <template id="server-form">
+    <h1></h1>
+    <form class="dialog-form">
+      <label>显示名称<input name="name" required maxlength="100"></label>
+      <div class="field-grid host-fields">
+        <label>主机名或 IP<input name="host" required maxlength="253" placeholder="server.example.com"></label>
+        <label>端口<input name="port" type="number" value="22" min="1" max="65535" required></label>
+      </div>
+      <div class="field-grid">
+        <label>SSH 用户<input name="username" required maxlength="128"></label>
+        <label>认证方式<select name="auth"><option value="password">密码</option><option value="key">私钥</option></select></label>
+      </div>
+      <div class="field-grid">
+        <label data-password>登录密码<span class="password-field"><input name="password" type="password" autocomplete="off"><button type="button" data-eye aria-label="显示密码" title="显示密码"><span class="eye-icon" aria-hidden="true"></span></button></span></label>
+        <label>服务器所在地<select name="location"></select></label>
+      </div>
+      <div data-key hidden>
+        <label>私钥<textarea name="privateKey" rows="4" spellcheck="false" placeholder="粘贴私钥或从本地导入"></textarea></label>
+        <button type="button" class="small" data-import>导入私钥文件</button>
+        <label>私钥口令<input name="passphrase" type="password" autocomplete="off"></label>
+      </div>
+      <div class="field-grid">
+        <label>分组<select name="group"></select></label>
+        <label>SSH 跳板<select name="jump"></select></label>
+      </div>
+      <div class="dialog-error" role="alert"></div>
+      <div class="dialog-actions">
+        <span class="record-actions"><button type="button" class="danger" data-delete hidden>删除</button><button type="button" data-copy hidden>复制</button></span>
+        <button type="button" data-test>测试连接</button>
+        <button type="button" data-cancel>取消</button>
+        <button class="primary">保存连接</button>
+      </div>
+    </form>
+  </template>
+</body>
+</html>

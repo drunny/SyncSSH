@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist[0-9]*/
+*.log
+
+.env*
+vault.json*
+*.pem
+*.key
