@@ -59,7 +59,7 @@ jobs:
           codesign --verify --deep --strict "$volume/SyncSSH.app"
           installed="$RUNNER_TEMP/SyncSSH.app"
           ditto "$volume/SyncSSH.app" "$installed"
-          SYNCSSH_TEST_EXECUTABLE="$installed/Contents/MacOS/Electron" npm run test:desktop
+          SYNCSSH_TEST_EXECUTABLE="$installed/Contents/MacOS/Electron" node --test --test-force-exit --test-reporter=tap test/desktop.test.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: syncssh-${{ matrix.platform }}

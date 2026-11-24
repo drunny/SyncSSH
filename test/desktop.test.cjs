@@ -20,8 +20,8 @@ async function openDesktop(profile, t) {
     args: packaged ? [] : [root],
     cwd: root, env: { ...process.env, SYNCSSH_PROFILE: profile, ELECTRON_ENABLE_LOGGING: '1' }
   });
+  const child = app.process();
   t.after(async () => {
-    const child = app.process();
     if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
     const killer = setTimeout(() => child.kill('SIGKILL'), 2500);
     try { await app.close().catch(() => {}); }
