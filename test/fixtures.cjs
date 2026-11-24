@@ -219,8 +219,19 @@ function backend(initial) {
   return { files, attach };
 }
 
+function testKeys(options) {
+  // ssh2's generator can strip a leading zero from an Ed25519 public key.
+  for (let i = 0; i < 10; i++) {
+    const keys = utils.generateKeyPairSync('ed25519', options);
+    const publicKey = utils.parseKey(keys.public);
+    const privateKey = utils.parseKey(keys.private, options?.passphrase);
+    if (!(publicKey instanceof Error) && !(privateKey instanceof Error)) return keys;
+  }
+  throw new Error('Could not generate a valid SSH test key pair.');
+}
+
 async function sshFixture() {
-  const userKey = utils.generateKeyPairSync('ed25519', { cipher: 'aes256-ctr', passphrase: 'test-key-only' });
+  const userKey = testKeys({ cipher: 'aes256-ctr', passphrase: 'test-key-only' });
   const publicKey = utils.parseKey(userKey.public);
   const connections = new Set();
   const sampleTimers = new Set();
@@ -229,7 +240,7 @@ async function sshFixture() {
   const direct = await serve('direct');
   const target = await serve('target');
   async function serve(kind) {
-    const hostKey = utils.generateKeyPairSync('ed25519');
+    const hostKey = testKeys();
     const hostFingerprint = fingerprint(utils.parseKey(hostKey.public).getPublicSSH());
     const storage = backend(kind + ' text\n');
     let installed = false;
