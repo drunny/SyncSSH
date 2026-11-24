@@ -74,11 +74,13 @@ function renderTree(session) {
       showFileState(session);
     }
     if (!expanded || depth >= 64) return;
-    const children = new Set((session.tree.get(dir) || []).filter((item) => item.dir)
+    const children = new Set((session.tree.get(dir) || []).filter((item) => item.dir && fileVisible(item))
       .map((item) => joinPath(dir, item.name)));
-    for (const known of session.expanded) if (known !== '/' && dirname(known) === dir) children.add(known);
+    for (const known of session.expanded) {
+      if (known !== '/' && dirname(known) === dir && fileVisible({ name: basename(known) })) children.add(known);
+    }
     for (const child of children) visit(child, depth + 1);
-    for (const item of (session.tree.get(dir) || []).filter((item) => !item.dir)) {
+    for (const item of (session.tree.get(dir) || []).filter((item) => !item.dir && fileVisible(item))) {
       const path = joinPath(dir, item.name);
       const file = el('div', undefined, 'tree-row tree-file');
       file.style.paddingLeft = Math.min((depth + 1) * 13 + 14, 119) + 'px';
@@ -107,6 +109,57 @@ function sizeLabel(bytes) {
   return (bytes / 1024 ** 2).toFixed(1) + ' MiB';
 }
 
+const collateFiles = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const fileDate = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hourCycle: 'h23' });
+const remoteType = (item) => item.dir ? '目录' : item.link ? '链接' : item.regular ? '文件' : '其他';
+const modeText = (mode) => Number.isInteger(mode) ? (mode & 0o7777).toString(8).padStart(4, '0') : '—';
+const columns = [
+  { key: 'name', label: '名称', value: (item) => item.name },
+  { key: 'size', label: '大小', value: (item) => item.dir ? undefined : item.size, display: (item) => item.dir ? '—' : sizeLabel(item.size) },
+  { key: 'mtime', label: '修改时间', value: (item) => item.mtime, display: (item) => Number.isFinite(item.mtime) ? fileDate.format(item.mtime * 1000) : '—' },
+  { key: 'mode', label: '权限', value: (item) => Number.isInteger(item.mode) ? item.mode & 0o7777 : undefined, display: (item) => modeText(item.mode) },
+  { key: 'type', label: '类型', value: remoteType, optional: true },
+  { key: 'uid', label: '所有者 (UID)', value: (item) => item.uid, optional: true },
+  { key: 'gid', label: '所属组 (GID)', value: (item) => item.gid, optional: true }
+];
+let fileView;
+function visibleColumns() {
+  return columns.filter(({ optional, key }) => !optional || fileView.extra.includes(key));
+}
+function renderFileHeader() {
+  const headings = $('file-headings');
+  const focus = document.activeElement?.dataset?.fileSort;
+  headings.replaceChildren(...visibleColumns().map(({ key, label }) => {
+    const heading = el('th');
+    heading.scope = 'col';
+    heading.dataset.column = key;
+    const sorted = fileView.sort === key;
+    heading.setAttribute('aria-sort', sorted ? (fileView.desc ? 'descending' : 'ascending') : 'none');
+    const toggle = button(label + (sorted ? (fileView.desc ? ' ↓' : ' ↑') : ''), () => {
+      fileView.desc = fileView.sort === key ? !fileView.desc : false;
+      fileView.sort = key;
+      savePref('file-view', fileView);
+      renderFiles();
+    });
+    toggle.dataset.fileSort = key;
+    heading.append(toggle);
+    if (focus === key) requestAnimationFrame(() => toggle.focus());
+    return heading;
+  }));
+}
+function compareRemote(column, a, b) {
+  const group = Number(b.dir) - Number(a.dir);
+  if (group) return group;
+  const left = column.value(a);
+  const right = column.value(b);
+  if (left == null || right == null) return Number(left == null) - Number(right == null);
+  const order = typeof left === 'number' ? left - right : collateFiles.compare(left, right);
+  return (fileView.desc ? -order : order) || collateFiles.compare(a.name, b.name);
+}
+function fileVisible(item) {
+  return fileView.hidden || !item.name.startsWith('.');
+}
+
 function renderFiles() {
   const session = activeSession();
   const usable = session?.status === '已连接';
@@ -116,6 +169,7 @@ function renderFiles() {
   }
   path.dataset.session = session?.id || '';
   $('sftp-server').textContent = session?.profile.name || '';
+  $('sftp-server').title = $('sftp-server').textContent;
   $('follow').checked = session?.follow || false;
   for (const id of ['root-dir', 'up', 'refresh', 'mkdir', 'mkfile', 'upload', 'sftp-path', 'file-search', 'follow']) $(id).disabled = !usable;
   const selected = session?.entries.find((item) => item.name === session.selected);
@@ -127,7 +181,16 @@ function renderFiles() {
     filter.dataset.session = session?.id || '';
   }
   const query = (session?.filter || '').trim().toLowerCase();
-  const results = (session?.entries || []).filter((item) => item.name.toLowerCase().includes(query));
+  const sort = columns.find(({ key }) => key === fileView.sort) || columns[0];
+  const visible = visibleColumns();
+  const results = (session?.entries || []).filter((item) => fileVisible(item) && item.name.toLowerCase().includes(query))
+    .sort((a, b) => compareRemote(sort, a, b));
+  const headingSignature = visible.map(({ key }) => key).join(',') + ':' + fileView.sort + ':' + fileView.desc;
+  if ($('file-headings').dataset.signature !== headingSignature) {
+    $('file-headings').dataset.signature = headingSignature;
+    renderFileHeader();
+  }
+  document.querySelector('.file-table table').style.minWidth = (435 + (visible.length - 4) * 92) + 'px';
   const view = document.createDocumentFragment();
   for (const item of results) {
     const row = el('tr', undefined, item.name === session.selected ? 'selected' : '');
@@ -146,8 +209,11 @@ function renderFiles() {
     name.onkeydown = (event) => { if (event.key === 'Enter') { event.preventDefault(); open(); } };
     const cell = el('td');
     cell.append(name);
-    row.append(cell, el('td', item.dir ? '—' : sizeLabel(item.size)),
-      el('td', Number.isFinite(item.mtime) ? new Date(item.mtime * 1000).toLocaleString() : '—'));
+    row.append(cell);
+    for (const column of visible.slice(1)) {
+      const value = column.display ? column.display(item) : column.value(item);
+      row.append(el('td', String(value ?? '—')));
+    }
     view.append(row);
   }
   $('file-rows').replaceChildren(view);
@@ -321,6 +387,32 @@ function showFileMenu(session, item, remote, x, y) {
 }
 
 function wireFiles() {
+  const saved = pref('file-view', {});
+  fileView = { sort: 'name', desc: false, hidden: true, extra: [], ...saved };
+  fileView.extra = Array.isArray(fileView.extra) ? fileView.extra : [];
+  $('file-view').onclick = () => {
+    const control = $('file-view');
+    const box = control.getBoundingClientRect();
+    const updateView = () => { savePref('file-view', fileView); renderFiles(); };
+    showMenu([
+      { label: (fileView.hidden ? '✓ ' : '  ') + '显示隐藏文件', action: () => {
+        fileView.hidden = !fileView.hidden;
+        const session = activeSession();
+        if (session?.contextItem?.item && !fileVisible(session.contextItem.item)) session.contextItem = null;
+        if (session && !fileView.hidden && session.selected.startsWith('.')) session.selected = '';
+        updateView();
+      } },
+      ...columns.filter(({ optional }) => optional).map(({ key, label }) => ({
+        label: (fileView.extra.includes(key) ? '✓ ' : '  ') + label,
+        action: () => {
+          const remove = fileView.extra.includes(key);
+          fileView.extra = remove ? fileView.extra.filter((column) => column !== key) : [...fileView.extra, key];
+          if (remove && fileView.sort === key) { fileView.sort = 'name'; fileView.desc = false; }
+          updateView();
+        }
+      }))
+    ], box.left, box.bottom + 4, false, control);
+  };
   const withSession = (run) => {
     const session = activeSession();
     if (session?.status === '已连接') run(session);

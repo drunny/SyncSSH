@@ -74,7 +74,7 @@ async function davForm(page, options) {
 }
 const serverButton = (page, name) => page.locator('#server-list .server-main').filter({ hasText: name });
 async function connect(page, name) {
-  await serverButton(page, name).click();
+  await serverButton(page, name).dblclick();
   await page.waitForFunction((name) => document.querySelector('#footer-ssh').textContent.includes(name + ' · 已连接'), name);
   await page.locator('#file-rows button[title="readme.txt"]').waitFor();
 }
@@ -191,7 +191,8 @@ test('Windows desktop creates, connects, edits, saves screenshots, syncs and res
   assert.ok(exported.includes('本地测试') && exported.includes('data:image/png;base64,'));
 
 
-  await btn(page, '同步设置').click();
+  await btn(page, '选项').click();
+  await page.getByRole('menuitem', { name: /同步设置/ }).click();
   await davForm(page, { ...dav.credentials, minutes: 0 });
   await btn(page, '保存并同步').click();
   await page.locator('#dialog').waitFor({ state: 'hidden' });
@@ -207,7 +208,7 @@ test('Windows desktop creates, connects, edits, saves screenshots, syncs and res
   dav.gate.offline = false;
   await page.waitForFunction(() => document.querySelector('#footer-sync').textContent === 'WebDAV 已同步', null, { timeout: 16000 });
   assert.equal(dav.objects.size, 9);
-  await btn(page, '↻ 同步').click();
+  await btn(page, '立即同步').click();
   await pulse(page, 'WebDAV 已同步');
   assert.equal(dav.objects.size, 9);
 
@@ -264,8 +265,16 @@ test('v1 desktop implements connection probes, server organization, host UI, rem
   await btn(page, '创建仓库').click();
   await page.locator('#dialog').waitFor({ state: 'hidden' });
   assert.match(await page.locator('#system-clock').textContent(), /^\d{2}:\d{2}:\d{2}$/);
+  assert.match(await page.locator('#system-date').textContent(), /年.*月.*日/);
+  assert.match(await page.locator('#system-zone').textContent(), /UTC[+−]\d\d:\d\d/);
+  const separator = page.getByRole('separator', { name: '调整左区宽度' });
+  const beforeWidth = Number(await separator.getAttribute('aria-valuenow'));
+  await separator.press('ArrowRight');
+  assert.equal(Number(await separator.getAttribute('aria-valuenow')), beforeWidth + 12);
+  assert.equal(await page.evaluate(() => pref('sidebar-width', 0)), beforeWidth + 12);
 
-  await btn(page, '同步设置').click();
+  await btn(page, '选项').click();
+  await page.getByRole('menuitem', { name: /同步设置/ }).click();
   await davForm(page, dav.credentials);
   await btn(page, '测试连接').click();
   await page.getByText('WebDAV 读写测试通过，可以创建同步仓库。', exact).waitFor();
@@ -313,13 +322,23 @@ test('v1 desktop implements connection probes, server organization, host UI, rem
   await page.locator('#dialog').getByRole('button', { name: '复制', ...exact }).click();
   await serverButton(page, '副本1').waitFor();
 
-  await serverButton(page, '直连主机').first().click();
+  ssh.direct.files.set('/home/.hidden.txt', { bytes: Buffer.from('hidden') });
+  const directServer = serverButton(page, '直连主机').first();
+  await directServer.click();
+  assert.equal(await directServer.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.evaluate(() => sessions.size), 0);
+  await directServer.dblclick();
   await page.locator('#file-rows button[title="readme.txt"]').waitFor();
   assert.match(await page.locator('#footer-ssh').textContent(), /已连接 · \d\d:\d\d:\d\d/);
   const prompts = await page.evaluate(() => window.testTrustPrompts);
   assert.equal(prompts.length, 2, 'unsaved connection test did not permanently pin the host');
   assert.ok(prompts.every(({ detail }) => detail === ssh.direct.hostFingerprint));
 
+  const hidden = page.locator('#file-rows [title=".hidden.txt"]');
+  await hidden.waitFor();
+  await btn(page, '文件列表选项').click();
+  await page.getByRole('menuitem', { name: /显示隐藏文件/ }).click();
+  await hidden.waitFor({ state: 'hidden' });
   const sessionTab = page.locator('#tabs .tab-main').filter({ hasText: '直连主机' });
   await sessionTab.click({ button: 'right' });
   await page.getByRole('menuitem', { name: '复制终端' }).click();
@@ -343,6 +362,12 @@ test('v1 desktop implements connection probes, server organization, host UI, rem
   await page.locator('#dialog').waitFor({ state: 'hidden' });
   const renamed = page.locator('#file-rows button[title="renamed.txt"]');
   await renamed.click();
+  assert.ok((await page.locator('#file-rows tr.selected').textContent()).includes('0644'));
+  await btn(page, '文件列表选项').click();
+  await page.getByRole('menuitem', { name: /所有者/ }).click();
+  assert.ok((await page.locator('#file-rows tr.selected').textContent()).includes('1000'));
+  await page.locator('#file-headings [data-column=name] button').click();
+  assert.equal(await page.locator('#file-headings [data-column=name]').getAttribute('aria-sort'), 'descending');
   await btn(page, '更多').click();
   await page.getByRole('menuitem', { name: '更改权限' }).click();
   await page.getByLabel('八进制权限（如 644、755）').fill('600');
@@ -379,7 +404,7 @@ test('v1 desktop implements connection probes, server organization, host UI, rem
   await card.getByText('在线', exact).waitFor();
   assert.equal(ssh.counters.installs, 1);
   await btn(page, '状态').click();
-  await page.locator('#status progress[aria-label=CPU]').waitFor();
+  await page.locator('#status canvas[aria-label=CPU实时曲线]').waitFor();
   await btn(page, '停用监控').click();
   await page.locator('#status').getByText('未启用', exact).waitFor();
 
@@ -412,6 +437,7 @@ test('v1 desktop implements connection probes, server organization, host UI, rem
   await page.locator('#rest-dialog').waitFor({ state: 'hidden' });
   await page.locator('#alarm-toast').waitFor();
   await page.waitForFunction(() => document.querySelector('#alarm-sound').currentTime > 0.02);
+  assert.equal(await page.locator('#alarm-sound').evaluate((sound) => sound.duration), 20);
   await btn(page, '关闭提醒').click();
   t.after(() => fs.rm(temp, { recursive: true, force: true }).catch(() => {}));
 });

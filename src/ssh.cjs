@@ -144,7 +144,8 @@ class Sessions {
           filename !== '.' && filename !== '..' && !filename.includes('/') && !filename.includes('\0')
         ).map(({ filename, attrs }) => ({
           name: filename, dir: attrs.isDirectory(), link: attrs.isSymbolicLink(),
-          regular: attrs.isFile(), size: attrs.size, mtime: attrs.mtime
+          regular: attrs.isFile(), size: attrs.size, mtime: attrs.mtime,
+          mode: attrs.mode, uid: attrs.uid, gid: attrs.gid
         })).sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name)) };
       }
       case 'read': {

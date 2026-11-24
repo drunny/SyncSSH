@@ -36,13 +36,11 @@ textarea, .mono, #sftp-path { font-family: "Cascadia Mono", Consolas, "Microsoft
 .small { font-size: 12px; padding: 3px 7px; }
 .danger, .dialog-error, .error { color: var(--danger); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-#workspace { height: 100%; display: grid; grid-template-rows: 48px minmax(0, 1fr) 26px; }
-.appbar, .status-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; gap: 12px; background: var(--surface); }
-.appbar { border-bottom: 1px solid var(--line); }
+#workspace { height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) 26px; }
+.status-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; gap: 12px; background: var(--surface); }
 .brand, .modal-brand { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 700; letter-spacing: .015em; }
 .brand-symbol, .empty-symbol { color: var(--accent); background: #223b3b; border: 1px solid #345c56; border-radius: 7px; font: 700 16px/1 Consolas, monospace; padding: 5px 6px; }
-.app-actions { display: flex; gap: 7px; }
-.work-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
+.work-grid { display: grid; grid-template-columns: var(--sidebar-width, 260px) 6px minmax(0, 1fr); min-height: 0; }
 .sidebar { display: grid; grid-template-columns: 43px minmax(0, 1fr); background: var(--surface); border-right: 1px solid var(--line); min-height: 0; }
 .rail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; background: var(--base); border-right: 1px solid var(--line); }
 .rail button { border-color: transparent; background: transparent; width: 33px; height: 34px; padding: 0; color: var(--muted); font-size: 17px; }
@@ -97,8 +95,6 @@ textarea, .mono, #sftp-path { font-family: "Cascadia Mono", Consolas, "Microsoft
 #pane-divider { cursor: row-resize; touch-action: none; background: var(--line); }
 #pane-divider:hover, #pane-divider:focus-visible { background: var(--focus); }
 .files { background: var(--surface); }
-.files-title, .file-tools { display: flex; align-items: center; gap: 7px; padding: 5px 9px; min-height: 34px; }
-.files-title { background: var(--panel); border-bottom: 1px solid var(--line); }
 .follow { margin-left: auto; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 #path-form { flex: 1; min-width: 45px; }
 #file-search { max-width: 150px; }
@@ -111,8 +107,6 @@ textarea, .mono, #sftp-path { font-family: "Cascadia Mono", Consolas, "Microsoft
 table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 th, td { padding: 3px 8px; text-align: left; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 th { color: var(--muted); font-size: 12px; position: sticky; top: 0; background: var(--panel); z-index: 1; }
-th:nth-child(2) { width: 78px; }
-th:nth-child(3) { width: 144px; }
 td button { background: transparent; border: 0; padding: 0 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 tr.selected, tbody tr:hover { background: var(--raised); }
 .file-icon { color: #f1d199; margin-right: 6px; }
@@ -136,9 +130,7 @@ dialog h1 { font-size: 20px; margin: 0 0 8px; }
 .conflict { width: 100%; text-align: left; color: #f3d38f; }
 .conflict-preview { max-height: 130px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--base); padding: 8px; }
 @media (max-width: 1030px) {
-  .work-grid { grid-template-columns: 232px minmax(0, 1fr); }
   #file-search { max-width: 113px; }
-  th:nth-child(3) { width: 110px; }
 }
 
 :root[data-theme=light] {
@@ -150,8 +142,6 @@ dialog h1 { font-size: 20px; margin: 0 0 8px; }
   --base: #000; --surface: #000; --panel: #08120a; --raised: #102619; --line: #245731;
   --text: #82fc9d; --muted: #68b87a; --accent: #78ee92; --focus: #9affaa; --danger: #ffa88c;
 }
-.appbar { position: relative; }
-#system-clock { position: absolute; left: 50%; transform: translateX(-50%); font: 600 16px/1 Consolas, monospace; letter-spacing: .09em; }
 #alarm-countdown { color: var(--muted); font: 12px/1.3 Consolas, "Microsoft YaHei UI", monospace; margin-left: 8px; }
 #footer-ssh { font-variant-numeric: tabular-nums; }
 .sidebar { grid-template-columns: minmax(0, 1fr); grid-template-rows: 44px minmax(0, 1fr) 42px; }
@@ -251,7 +241,6 @@ dialog h1 { font-size: 20px; margin: 0 0 8px; }
   .file-tools { gap: 4px; }
   .file-tools button { padding: 4px 6px; }
   #file-search { flex-basis: 105px; }
-  #system-clock { font-size: 13px; }
 }
 
 .group-toggle::before { content: '▾'; margin-right: 6px; }
@@ -259,3 +248,60 @@ dialog h1 { font-size: 20px; margin: 0 0 8px; }
 
 /* The xterm viewport has its own opaque fallback that would hide the terminal backdrop. */
 .terminal-container .xterm .xterm-viewport { background-color: transparent; }
+
+.sidebar { min-width: 0; border-right: 0; grid-template-rows: 40px minmax(0, 1fr) 42px; }
+#sidebar-divider { cursor: col-resize; touch-action: none; background: var(--line); }
+#sidebar-divider:hover, #sidebar-divider:focus-visible { background: var(--focus); }
+.sidebar-footer { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 6px; margin: 4px 9px 8px; height: 30px; }
+.sidebar-footer .sidebar-options { margin: 0; }
+#sync-now { width: 30px; height: 30px; padding: 0; font-size: 17px; }
+#servers.side-panel { gap: 5px; padding: 8px; }
+#servers .section-title { min-height: 23px; }
+#servers #server-search { padding-block: 3px; }
+#server-list { container-type: inline-size; }
+#server-list .group-row { margin-top: 2px; }
+#server-list .group-toggle { padding-block: 2px; }
+#server-list .server-row { padding-block: 0; margin-bottom: 1px; gap: 2px; }
+#server-list .row-detail { min-height: 23px; padding: 0 5px; }
+#server-list .server-main { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) auto; min-height: 25px; padding: 1px 5px; gap: 4px; }
+#server-list .server-main > :nth-child(2) { grid-column: 2; grid-row: 1; }
+#server-list .server-main > .location-chip { grid-column: 3; grid-row: 1; }
+#server-list .server-main.selected { outline: 1px solid var(--focus); outline-offset: -1px; }
+@container (max-width: 280px) {
+  #server-list .server-main { grid-template-columns: minmax(0, 1fr) auto; }
+  #server-list .server-main > :nth-child(2) { display: none; }
+  #server-list .server-main > .location-chip { grid-column: 2; }
+}
+.clock-float {
+  position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: grid; justify-items: center; gap: 2px; width: max-content; max-width: 67%;
+  pointer-events: none; padding: 4px 9px; border: 1px solid var(--line); border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 78%, transparent); backdrop-filter: blur(5px);
+}
+.clock-caption { display: flex; gap: 7px; flex-wrap: wrap; justify-content: center; color: var(--muted); font-size: 10px; }
+.clock-caption span { overflow-wrap: anywhere; }
+#system-clock { position: static; transform: none; font: 600 17px/1 Consolas, monospace; letter-spacing: .08em; }
+#alarm-countdown { pointer-events: auto; margin: 0; padding: 0 4px; border: 0; background: transparent; }
+.status-summary { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; margin: 0; }
+.status-summary dt { font-size: 11px; color: var(--muted); }
+.status-summary dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.metric-row.trend-row { grid-template-columns: auto minmax(0, 1fr); }
+.trend-row strong { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.trend-row strong { font-variant-numeric: tabular-nums; }
+.metric-trend { height: 27px; border-radius: 3px; }
+.file-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: thin; padding: 3px 7px; min-height: 37px; }
+.file-tools > * { flex-shrink: 0; }
+.file-tools .follow { margin-left: 0; font-size: 11px; }
+.file-tools h2 { white-space: nowrap; font-size: 12px; }
+#sftp-server { max-width: 62px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; font-size: 11px; }
+#sftp-server:empty { display: none; }
+#path-form { flex: 1 0 84px; }
+#file-search { flex: 0 0 103px; padding-block: 4px; }
+.file-tools button { padding: 3px 6px; }
+#file-headings th { padding-block: 0; }
+#file-headings th button { width: 100%; overflow: hidden; text-overflow: ellipsis; text-align: left; border: 0; background: transparent; padding: 3px 0; }
+#file-headings [data-column=size] { width: 64px; }
+#file-headings [data-column=mtime] { width: 140px; }
+#file-headings [data-column=mode] { width: 55px; }
+#file-headings [data-column=type] { width: 63px; }
+#file-headings [data-column=uid], #file-headings [data-column=gid] { width: 101px; }

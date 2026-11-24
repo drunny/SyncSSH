@@ -1,6 +1,6 @@
 {
   "name": "syncssh",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Personal SSH and SFTP workspace with encrypted WebDAV sync",
   "main": "src/main.cjs",

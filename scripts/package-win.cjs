@@ -7,19 +7,18 @@ const path = require('node:path');
 
 const run = promisify(execFile);
 
-async function releaseDirectory(root, explicit) {
-  if (explicit) {
-    if (!/^dist(?:[1-9][0-9]*)?$/.test(explicit)) throw new Error('Choose a numbered dist directory.');
-    const directory = path.join(root, explicit);
-    await fs.mkdir(directory);
-    return directory;
+async function releaseDirectory(root, version, explicit) {
+  const parsed = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!parsed) throw new Error('Use a numeric major.minor.patch version to build a release.');
+  const [, major, minor, patch] = parsed;
+  const folder = 'dist' + major + '.' + minor + (patch === '0' ? '' : '.' + patch);
+  if (explicit && explicit !== folder) throw new Error('This version must be built in ' + folder + '.');
+  const directory = path.join(root, folder);
+  try { await fs.mkdir(directory); }
+  catch (error) {
+    if (error.code === 'EEXIST') throw new Error(folder + ' already exists. Release directories are preserved.');
+    throw error;
   }
-  const names = await fs.readdir(root);
-  const numbers = names.filter((name) => /^dist(?:[1-9][0-9]*)?$/.test(name))
-    .map((name) => name === 'dist' ? 1 : Number(name.slice(4)));
-  const next = Math.max(0, ...numbers) + 1;
-  const directory = path.join(root, next === 1 ? 'dist' : 'dist' + next);
-  await fs.mkdir(directory);
   return directory;
 }
 
@@ -30,7 +29,7 @@ async function build() {
   const executable = require('electron');
   const runtime = path.dirname(executable);
   const baseName = 'SyncSSH-win32-' + process.arch;
-  const output = await releaseDirectory(root, process.argv[2]);
+  const output = await releaseDirectory(root, manifest.version, process.argv[2]);
   const target = path.join(output, baseName);
   await fs.mkdir(target);
   await fs.cp(runtime, target, { recursive: true, filter: (file) => path.basename(file) !== 'default_app.asar' });

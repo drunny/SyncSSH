@@ -145,6 +145,7 @@ function switchPanel(name) {
 function renderServerList() {
   if (draggedServer) return;
   const list = $('server-list');
+  const scroll = list.scrollTop;
   const query = $('server-search').value.trim().toLowerCase();
   list.replaceChildren();
   const available = servers().filter((entry) => {
@@ -183,18 +184,33 @@ function renderServerList() {
     for (const entry of members) {
       const v = liveVersion(entry);
       const value = v.value;
-      const main = button('', () => {
-        selectedHost = entry.id;
+      const connect = () => {
         if (entry.versions.length > 1) showConflict(entry);
         else openSession(entry, v).catch(report);
-      }, 'server-main' + (hostId() === entry.id ? ' current' : ''));
+      };
+      const main = button('', () => {
+        selectedHost = entry.id;
+        for (const item of list.querySelectorAll('.server-main')) {
+          item.classList.toggle('selected', item === main);
+          item.setAttribute('aria-pressed', String(item === main));
+        }
+      }, 'server-main' + (activeSession()?.profileId === entry.id ? ' current' : '') +
+        (selectedHost === entry.id ? ' selected' : ''));
+      main.setAttribute('aria-pressed', String(selectedHost === entry.id));
+      main.ondblclick = connect;
+      main.onkeydown = (event) => {
+        if (event.key !== 'Enter' || event.repeat) return;
+        event.preventDefault();
+        main.click();
+        connect();
+      };
       main.append(el('strong', value.name), el('span', value.username + '@' + value.host +
         (value.port === 22 ? '' : ':' + value.port) + (value.jump ? ' · 跳板' : '')));
       if (value.location) {
         const place = el('span', locationLabel(value.location), 'location-chip');
         main.append(place);
       }
-      main.title = entry.versions.length > 1 ? '处理同步冲突' : '连接 ' + value.name;
+      main.title = entry.versions.length > 1 ? '处理同步冲突' : '双击连接 ' + value.name + ' · ' + main.children[1].textContent;
       const edit = button(entry.versions.length > 1 ? '有冲突' : '⋯', () => {
         if (entry.versions.length > 1) showConflict(entry);
         else serverDialog(entry).catch(report);
@@ -224,6 +240,7 @@ function renderServerList() {
     addGroupDrop(drop, '');
     list.append(drop);
   }
+  list.scrollTop = scroll;
 }
 
 function formDialog(heading, fieldLabel, initial, onSave, onDelete) {
@@ -443,11 +460,13 @@ function renderStatus() {
       : state.status.time ? new Date(state.status.time).toLocaleString() : '等待同步')],
     ['待同步修订', String(state.status.pending || 0)]
   ];
+  const summary = el('dl', undefined, 'status-card status-summary');
   for (const [label, description] of details) {
-    const card = el('div', undefined, 'status-card');
-    card.append(el('h2', label), el('p', description, 'muted'));
-    info.append(card);
+    const value = el('dd', description);
+    value.title = description;
+    summary.append(el('dt', label), value);
   }
+  info.append(summary);
   info.scrollTop = scroll;
 }
 async function showPins() {
@@ -676,7 +695,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('add-group').onclick = () => groupDialog();
   $('add-server').onclick = $('empty-add').onclick = () => serverDialog().catch(report);
   $('server-search').oninput = renderServerList;
-  $('settings').onclick = () => settingsDialog().catch(report);
   $('sync-now').onclick = async () => {
     try {
       const result = await api.sync();

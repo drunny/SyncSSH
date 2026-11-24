@@ -181,7 +181,17 @@ function endBreak() {
 }
 function tickClock() {
   const now = Date.now();
-  $('system-clock').textContent = new Date(now).toLocaleTimeString('zh-CN', { hour12: false });
+  const local = new Date(now);
+  const time = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    timeZoneName: 'long' }).formatToParts(local);
+  const value = (type) => time.find((part) => part.type === type)?.value;
+  $('system-clock').textContent = [value('hour'), value('minute'), value('second')].join(':');
+  $('system-clock').dateTime = local.toISOString();
+  $('system-date').textContent = local.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  const offset = -local.getTimezoneOffset();
+  const digits = (part) => String(part).padStart(2, '0');
+  $('system-zone').textContent = (value('timeZoneName') || '') + ' · UTC' + (offset < 0 ? '−' : '+')
+    + digits(Math.floor(Math.abs(offset) / 60)) + ':' + digits(Math.abs(offset) % 60);
   const countdown = $('alarm-countdown');
   if (clockSettings.nextAlarm && now >= clockSettings.nextAlarm) {
     clockSettings.nextAlarm = 0;
@@ -328,7 +338,14 @@ function monitorCard(id, compact) {
   headline.append(label, pill);
   card.append(headline);
   if (sample) {
-    for (const [name, value, key] of [['CPU', sample.cpu, 'cpu'], ['内存', sample.memory, 'memory'], ['磁盘 /', sample.disk, 'disk']]) {
+    if (!compact) {
+      card.append(metricTrend(id, 'CPU', percentage(sample.cpu), ['cpu'], 100),
+        metricTrend(id, '网络 ↓ / ↑', rate(sample.rx) + ' / ' + rate(sample.tx), ['rx', 'tx']),
+        metricTrend(id, '磁盘读 / 写', rate(sample.read) + ' / ' + rate(sample.write), ['read', 'write']));
+    }
+    const gauges = compact ? [['CPU', sample.cpu], ['内存', sample.memory], ['磁盘 /', sample.disk]]
+      : [['内存', sample.memory], ['磁盘容量 /', sample.disk]];
+    for (const [name, value] of gauges) {
       const row = el('div', undefined, 'metric-row');
       row.append(el('span', name), el('strong', percentage(value)));
       const meter = document.createElement('progress');
@@ -336,13 +353,12 @@ function monitorCard(id, compact) {
       meter.value = value ?? 0;
       meter.setAttribute('aria-label', name);
       row.append(meter);
-      if (!compact && key === 'cpu') row.append(cpuTrend(id));
       card.append(row);
     }
     const io = el('div', undefined, 'metric-details');
-    io.append(el('span', '网络 ↓ ' + rate(sample.rx) + ' ↑ ' + rate(sample.tx)),
-      el('span', '磁盘读 ' + rate(sample.read) + ' · 写 ' + rate(sample.write)),
-      el('span', '内存 ' + sizeLabel(sample.ram) + ' · 根分区 ' + sizeLabel(sample.diskTotal)),
+    if (compact) io.append(el('span', '网络 ↓ ' + rate(sample.rx) + ' ↑ ' + rate(sample.tx)),
+      el('span', '磁盘读 ' + rate(sample.read) + ' · 写 ' + rate(sample.write)));
+    io.append(el('span', '内存 ' + sizeLabel(sample.ram) + ' · 根分区 ' + sizeLabel(sample.diskTotal)),
       el('span', '负载 ' + sample.load.toFixed(2) + ' · 运行 ' + duration(sample.uptime * 1000)));
     if (metric.state === 'online') io.append(el('span', '最近采样 ' + new Date(metric.at).toLocaleTimeString()));
     card.append(io);
@@ -354,25 +370,42 @@ function monitorCard(id, compact) {
   card.append(action);
   return card;
 }
-function cpuTrend(id) {
+function metricTrend(id, name, current, keys, maximum) {
+  const row = el('div', undefined, 'metric-row trend-row');
   const canvas = el('canvas', undefined, 'metric-trend');
-  canvas.width = 174;
-  canvas.height = 32;
-  canvas.setAttribute('aria-label', '最近 CPU 使用率');
-  const history = (samples.get(id) || []).map((sample) => sample.cpu).filter(Number.isFinite);
+  canvas.width = 400;
+  canvas.height = 48;
+  canvas.setAttribute('role', 'img');
+  canvas.setAttribute('aria-label', name + '实时曲线');
+  const history = samples.get(id) || [];
+  const values = keys.flatMap((key) => history.map((sample) => sample[key]).filter(Number.isFinite));
+  const ceiling = maximum || Math.max(1, ...values);
   const ctx = canvas.getContext('2d');
-  ctx.strokeStyle = '#29c995';
-  ctx.lineWidth = 2;
-  if (history.length > 1) {
+  ctx.strokeStyle = '#778b9c45';
+  for (const y of [12, 24, 36]) {
     ctx.beginPath();
-    history.forEach((n, i) => {
-      const x = i * 174 / Math.max(1, history.length - 1);
-      const y = 30 - 28 * n / 100;
-      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
-    });
+    ctx.moveTo(0, y);
+    ctx.lineTo(400, y);
     ctx.stroke();
   }
-  return canvas;
+  keys.forEach((key, index) => {
+    ctx.strokeStyle = index ? '#eaab56' : '#38bba4';
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    let started = false;
+    history.forEach((point, i) => {
+      if (!Number.isFinite(point[key])) { started = false; return; }
+      const x = history.length === 1 ? 397 : 3 + i * 394 / (history.length - 1);
+      const y = 45 - 41 * Math.min(1, point[key] / ceiling);
+      if (started) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      if (i === history.length - 1) ctx.fillRect(x - 2, y - 2, 4, 4);
+      started = true;
+    });
+    ctx.stroke();
+  });
+  row.append(el('span', name), el('strong', current), canvas);
+  return row;
 }
 function renderMonitorList() {
   if (panel !== 'monitor-panel') return;
@@ -422,6 +455,41 @@ function wireDesktopTools() {
       event.preventDefault();
     }
   });
+  wireSidebarResize();
   tickClock();
   setInterval(tickClock, 500);
+}
+
+function wireSidebarResize() {
+  const divider = $('sidebar-divider');
+  const grid = document.querySelector('.work-grid');
+  const sidebar = document.querySelector('.sidebar');
+  const min = 190;
+  const maximum = () => Math.max(min, Math.min(540, grid.clientWidth - 470));
+  let preferred = pref('sidebar-width', 260);
+  if (!Number.isFinite(preferred)) preferred = 260;
+  const resize = (width, remember = false) => {
+    const max = maximum();
+    const current = Math.round(Math.max(min, Math.min(max, width)));
+    grid.style.setProperty('--sidebar-width', current + 'px');
+    divider.setAttribute('aria-valuemin', String(min));
+    divider.setAttribute('aria-valuemax', String(max));
+    divider.setAttribute('aria-valuenow', String(current));
+    if (remember) { preferred = current; savePref('sidebar-width', preferred); }
+  };
+  divider.onpointerdown = (event) => {
+    if (event.button === 0) divider.setPointerCapture(event.pointerId);
+  };
+  divider.onpointermove = (event) => {
+    if (divider.hasPointerCapture(event.pointerId)) resize(event.clientX - grid.getBoundingClientRect().left);
+  };
+  divider.onlostpointercapture = () => resize(sidebar.offsetWidth, true);
+  divider.onkeydown = (event) => {
+    const bumps = { ArrowLeft: -12, ArrowRight: 12 };
+    if (!(event.key in bumps) && !['Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    resize(event.key === 'Home' ? min : event.key === 'End' ? maximum() : sidebar.offsetWidth + bumps[event.key], true);
+  };
+  new ResizeObserver(() => resize(preferred)).observe(grid);
+  resize(preferred);
 }
