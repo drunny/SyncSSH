@@ -46,6 +46,7 @@ jobs:
           test "$(stat -c '%a %u' /opt/SyncSSH/chrome-sandbox)" = '4755 0'
           SYNCSSH_TEST_EXECUTABLE=/opt/SyncSSH/syncssh xvfb-run -a npm run test:desktop
       - name: Mount and test macOS preview
+        timeout-minutes: 5
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -56,7 +57,9 @@ jobs:
           hdiutil attach "$image" -readonly -nobrowse -mountpoint "$volume"
           trap 'hdiutil detach "$volume"' EXIT
           codesign --verify --deep --strict "$volume/SyncSSH.app"
-          SYNCSSH_TEST_EXECUTABLE="$volume/SyncSSH.app/Contents/MacOS/Electron" npm run test:desktop
+          installed="$RUNNER_TEMP/SyncSSH.app"
+          ditto "$volume/SyncSSH.app" "$installed"
+          SYNCSSH_TEST_EXECUTABLE="$installed/Contents/MacOS/Electron" npm run test:desktop
       - uses: actions/upload-artifact@v4
         with:
           name: syncssh-${{ matrix.platform }}

@@ -21,10 +21,13 @@ async function openDesktop(profile, t) {
     cwd: root, env: { ...process.env, SYNCSSH_PROFILE: profile, ELECTRON_ENABLE_LOGGING: '1' }
   });
   t.after(async () => {
-    await app.evaluate(({ app }) => { setTimeout(() => app.exit(0), 25); }).catch(() => {});
-    await app.close().catch(() => {});
+    const child = app.process();
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+    const killer = setTimeout(() => child.kill('SIGKILL'), 2500);
+    try { await app.close().catch(() => {}); }
+    finally { clearTimeout(killer); }
   });
-  const page = await app.firstWindow();
+  const page = await app.firstWindow({ timeout: 15000 });
   await page.evaluate(() => {
     window.testTrustPrompts = [];
     const dialog = document.getElementById('trust-dialog');

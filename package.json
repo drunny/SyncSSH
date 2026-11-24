@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/core.test.cjs",
-    "test:desktop": "node --test test/desktop.test.cjs",
+    "test:desktop": "node --test --test-force-exit test/desktop.test.cjs",
     "package:win": "node scripts/package-win.cjs",
     "package:desktop": "node scripts/package-desktop.cjs"
   },
