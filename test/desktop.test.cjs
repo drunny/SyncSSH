@@ -455,6 +455,7 @@ test('v1.2 desktop queues a batch and restores an encrypted draft after restart 
   ssh.direct.files.set('/home/extra.txt', { bytes: Buffer.from('extra') });
   const first = await openDesktop(profilePath, t);
   const p = first.page;
+  await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(860, 560));
   await p.locator('input[name=master]').fill(master);
   await p.locator('input[name=confirm]').fill(master);
   await btn(p, '创建仓库').click();
