@@ -6,6 +6,7 @@ const { pathToFileURL } = require('node:url');
 const { Vault, index, uuid, idPattern, derive } = require('./vault.cjs');
 const { Dav, openRepository, restore, synchronize } = require('./dav.cjs');
 const { Monitor } = require('./monitor.cjs');
+const { TransferQueue } = require('./transfers.cjs');
 const { Sessions, validateKey } = require('./ssh.cjs');
 
 if (process.env.SYNCSSH_PROFILE) app.setPath('userData', path.resolve(process.env.SYNCSSH_PROFILE));
@@ -141,6 +142,7 @@ function trustHost(profile, presented, { role, temporary } = {}) {
 }
 
 const sessions = new Sessions({ trust: trustHost, emit: send });
+const transfers = new TransferQueue({ trust: trustHost, emit: (job) => send('transfer', job) });
 const monitor = new Monitor({ trust: trustHost, emit: (metric) => send('metric', metric) });
 const current = (record) => index(vault.state.events).get(record) || [];
 function version(record, id) {
@@ -466,6 +468,8 @@ handle('connect', async (id, profileId, base) => {
   const jump = profile.jump ? primary('server:' + profile.jump) : null;
   if (jump?.jump || profileId === profile.jump) throw new Error('仅支持单台跳板。');
   await sessions.connect(recordId(id), profile, jump);
+  const endpoint = ({ host, port, username }) => [host.toLowerCase(), port, username];
+  return JSON.stringify([endpoint(profile), jump ? endpoint(jump) : null]);
 });
 handle('disconnect', (id) => sessions.disconnect(id));
 receive('input', (id, data) => {
@@ -478,33 +482,94 @@ receive('resize', (id, cols, rows) => {
   if ([cols, rows].every((n) => Number.isInteger(n) && n > 0 && n < 2000)) sessions.resize(id, cols, rows);
 });
 handle('files', (id, op, remote, options) => {
-  if (!['list', 'read', 'save', 'mkdir', 'create', 'stat', 'rename', 'chmod', 'delete'].includes(op)) throw new Error('未知文件操作。');
+  if (!['list', 'read', 'save', 'save-as', 'mkdir', 'create', 'stat', 'rename', 'chmod', 'delete'].includes(op)) throw new Error('未知文件操作。');
   limit(remote, 8192, '远程路径');
   if (op === 'rename') limit(options?.name, 255, '文件名');
-  if (op === 'save') limit(options?.content, 2 * 1024 ** 2, '远程文本');
+  if (op === 'save' || op === 'save-as') limit(options?.content, 2 * 1024 ** 2, '远程文本');
   return sessions.files(id, op, remote, options);
 });
-handle('upload', async (id, dir) => {
-  const result = await dialog.showOpenDialog(window, { title: '选择上传文件', properties: ['openFile', 'multiSelections'] });
-  if (result.canceled) return [];
-  const results = [];
-  for (const file of result.filePaths) {
-    const name = path.basename(file);
-    try {
-      await sessions.files(id, 'upload', path.posix.join(dir, name), { local: file });
-      results.push({ name });
-    } catch (error) {
-      results.push({ name, error: error.message });
-    }
+function transferContext(id) {
+  const session = sessions.sessions.get(id);
+  if (!session?.sftp || !session.profile) throw new Error('请先建立 SSH 会话。');
+  return session;
+}
+
+function remotePath(value) {
+  limit(value, 8192, '远程路径');
+  if (!value.startsWith('/') || value.includes('\0') || path.posix.normalize(value) === '/') {
+    throw new Error('请选择绝对远程路径。');
   }
-  return results;
+  return value;
+}
+
+function localDisplayName(remote) {
+  const name = path.posix.basename(remote);
+  if (process.platform !== 'win32') return name;
+  const clean = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '');
+  return !clean || /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(clean) ? '_' + clean : clean;
+}
+
+handle('transfer-list', () => transfers.snapshot());
+handle('transfer-clear', () => transfers.clear());
+handle('transfer-change', (id, action) => transfers.change(recordId(id), action));
+handle('upload', async (id, dir) => {
+  const session = transferContext(id);
+  limit(dir, 8192, '远程目录');
+  if (!dir.startsWith('/') || dir.includes('\0')) throw new Error('请选择绝对远程目录。');
+  const result = await dialog.showOpenDialog(window, { title: '选择上传文件', properties: ['openFile', 'multiSelections'] });
+  if (result.canceled) return 0;
+  for (const file of result.filePaths) {
+    transfers.add('upload', session.profile, session.jump, path.posix.join(dir, path.basename(file)), file);
+  }
+  return result.filePaths.length;
 });
-handle('download', async (id, remote) => {
-  const name = path.posix.basename(remote).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
-  const result = await dialog.showSaveDialog(window, { title: '下载远程文件', defaultPath: name });
-  if (result.canceled) return false;
-  const skipped = await sessions.files(id, 'download', remote, { local: result.filePath });
-  return { skipped };
+handle('download', async (id, rawPaths) => {
+  const session = transferContext(id);
+  const paths = [...new Set(Array.isArray(rawPaths) ? rawPaths : [rawPaths])];
+  if (!paths.length || paths.length > 200) throw new Error('请选择 1 至 200 个下载项目。');
+  paths.forEach(remotePath);
+  const items = await Promise.all(paths.map(async (remote) => ({
+    remote, name: localDisplayName(remote), directory: (await sessions.files(id, 'stat', remote)).dir
+  })));
+  if (items.length === 1) {
+    const [item] = items;
+    const result = await dialog.showSaveDialog(window, { title: '下载远程文件', defaultPath: item.name });
+    if (result.canceled) return 0;
+    transfers.add('download', session.profile, session.jump, item.remote, result.filePath, item);
+    return 1;
+  }
+  const result = await dialog.showOpenDialog(window, { title: '选择下载目录', properties: ['openDirectory'] });
+  if (result.canceled) return 0;
+  for (const item of items) {
+    transfers.add('download', session.profile, session.jump, item.remote, path.join(result.filePaths[0], item.name), item);
+  }
+  return items.length;
+});
+function draftKey(entry) {
+  const server = recordId(entry.server);
+  const file = remotePath(entry.path);
+  const route = limit(entry.route, 8192, '连接标识');
+  return JSON.stringify([server, route, file]);
+}
+
+handle('draft-list', () => Object.values(vault.state.fileDrafts || {}).map(({ text, revision, ...details }) => details));
+handle('draft-get', (locator) => vault.state.fileDrafts?.[draftKey(locator)] || null);
+handle('draft-put', async (entry) => {
+  const key = draftKey(entry);
+  await vault.transact((draft) => {
+    const drafts = { ...draft.fileDrafts };
+    if (entry.text === null) {
+      delete drafts[key];
+    } else {
+      if (!drafts[key] && Object.keys(drafts).length >= 100) throw new Error('草稿已达 100 份，请先清理旧草稿。');
+      if (!/^[a-f0-9]{64}$/.test(entry.revision)) throw new Error('草稿版本无效。');
+      const text = limit(entry.text, 2 * 1024 ** 2, '草稿');
+      if (Buffer.byteLength(text) > 2 * 1024 ** 2) throw new Error('草稿超过 2 MiB，无法保存。');
+      drafts[key] = { server: entry.server, route: entry.route, path: entry.path, text, revision: entry.revision,
+        savedAt: Date.now(), crlf: Boolean(entry.crlf), mixed: Boolean(entry.mixed) };
+    }
+    draft.fileDrafts = drafts;
+  });
 });
 
 function createWindow() {
@@ -541,6 +606,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(createWindow);
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', () => {
+    transfers.close();
     monitor.close();
     for (const finish of trustRequests.values()) finish(false);
     clearInterval(interval);

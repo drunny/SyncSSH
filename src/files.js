@@ -20,6 +20,7 @@ async function navigate(session, directory) {
     session.dir = result.dir;
     session.entries = result.entries;
     session.selected = '';
+    session.selection = new Set();
     session.contextItem = null;
     session.scroll = 0;
     session.tree.set(result.dir, result.entries);
@@ -173,7 +174,8 @@ function renderFiles() {
   $('follow').checked = session?.follow || false;
   for (const id of ['root-dir', 'up', 'refresh', 'mkdir', 'mkfile', 'upload', 'sftp-path', 'file-search', 'follow']) $(id).disabled = !usable;
   const selected = session?.entries.find((item) => item.name === session.selected);
-  $('download').disabled = !usable || !selected || !(selected.dir || selected.regular || selected.link);
+  $('download').disabled = !usable || !session?.entries.some((item) =>
+    (session.selection?.has(item.name) || item === selected) && (item.dir || item.regular || item.link));
   $('sftp-more').disabled = !usable || !(selected || session?.contextItem);
   const filter = $('file-search');
   if (filter.dataset.session !== (session?.id || '')) {
@@ -193,13 +195,22 @@ function renderFiles() {
   document.querySelector('.file-table table').style.minWidth = (435 + (visible.length - 4) * 92) + 'px';
   const view = document.createDocumentFragment();
   for (const item of results) {
-    const row = el('tr', undefined, item.name === session.selected ? 'selected' : '');
-    const name = button('', () => {
-      session.selected = item.name;
-      session.contextItem = { item, path: joinPath(session.dir, item.name) };
-      $('sftp-more').disabled = !usable;
-      for (const other of $('file-rows').children) other.classList.toggle('selected', other === row);
-      $('download').disabled = !usable || !(item.dir || item.regular || item.link);
+    const row = el('tr', undefined, (session.selection?.has(item.name) || (!session.selection && item.name === session.selected)) ? 'selected' : '');
+    row.dataset.filename = item.name;
+    const name = button('', (event) => {
+      session.selection ||= new Set();
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+        if (session.selection.has(item.name)) session.selection.delete(item.name); else session.selection.add(item.name);
+      } else {
+        session.selection.clear();
+        session.selection.add(item.name);
+      }
+      session.selected = session.selection.has(item.name) ? item.name : [...session.selection].at(-1) || '';
+      const currentItem = session.entries.find((entry) => entry.name === session.selected);
+      session.contextItem = currentItem ? { item: currentItem, path: joinPath(session.dir, currentItem.name) } : null;
+      $('sftp-more').disabled = !usable || !session.selected;
+      for (const other of $('file-rows').children) other.classList.toggle('selected', session.selection.has(other.dataset.filename));
+      $('download').disabled = !usable || !session.entries.some((item) => session.selection.has(item.name) && (item.dir || item.regular || item.link));
     });
     name.append(el('span', item.dir ? '▸' : item.link ? '↗' : '▧', 'file-icon'), document.createTextNode(item.name));
     name.title = item.name;
@@ -248,35 +259,49 @@ function renderEditor() {
   const title = sessionLabel(doc) + ' · ' + doc.path + (doc.dirty ? ' *' : '');
   $('editor-title').textContent = title;
   $('editor-title').title = title;
+  $('compare-draft').hidden = !doc.conflict;
   $('save-file').disabled = !doc.dirty || doc.saving || current?.status !== '已连接';
   $('save-file').textContent = doc.saving ? '正在保存…' : '保存';
 }
 
-async function openRemote(session, item, remote = joinPath(session.dir, item.name)) {
+async function openRemote(session, item, remote = joinPath(session.dir, item.name), restore) {
   if (item.dir) { await navigate(session, remote); return; }
   if (!item.regular && !item.link) throw new Error('此文件类型无法编辑。');
   let file;
   try { file = await api.files(session.id, 'read', remote); }
   catch (error) {
     if (item.link) { await navigate(session, remote); return; }
-    throw error;
+    if (!restore) throw error;
+    file = { path: restore.path, content: '', revision: null };
   }
   if (!sessions.has(session.id)) return;
+  const key = { server: session.profileId, route: session.route, path: file.path };
+  const opened = [...documents.values()].find((doc) => matchingDraft(locator(doc), key));
+  if (opened && opened.session !== session.id) { activate('file', opened.id); return; }
   const id = session.id + ':' + file.path;
   if (!documents.has(id)) {
+    const saved = await api['draft-get'](key);
+    if (!sessions.has(session.id) || documents.has(id)) return;
     const input = el('textarea', undefined, 'editor-input');
     input.setAttribute('aria-label', '编辑 ' + file.path);
     input.setAttribute('wrap', 'off');
     input.spellcheck = false;
     input.value = file.content;
     const doc = {
-      id, session: session.id, path: file.path, textareaBase: input.value, revision: file.revision,
+      id, session: session.id, ...key, textareaBase: input.value, revision: saved?.revision ?? file.revision,
       crlf: file.content.includes('\r\n') && !file.content.replace(/\r\n/g, '').includes('\n'),
       mixed: file.content.includes('\r\n') && file.content.replace(/\r\n/g, '').includes('\n'),
-      input, dirty: false, saving: false
+      input, dirty: Boolean(saved), saving: false, persisted: Boolean(saved), conflict: Boolean(saved && saved.revision !== file.revision)
     };
+    if (saved) {
+      input.value = saved.text;
+      doc.crlf = saved.crlf;
+      doc.mixed = saved.mixed;
+      announce(doc.conflict ? '远端已修改。可比较草稿并另存副本。' : '已恢复本机草稿', doc.conflict);
+    }
     input.oninput = () => {
-      doc.dirty = input.value !== doc.textareaBase;
+      doc.dirty = doc.conflict || input.value !== doc.textareaBase;
+      scheduleDraft(doc);
       renderEditor();
       renderTabs();
     };
@@ -300,16 +325,17 @@ function removeDocument(id) {
   documents.delete(id);
   if (pinned === id) pinned = null;
 }
-function closeDocument(id) {
+async function closeDocument(id) {
   const doc = documents.get(id);
   if (doc.saving) { announce('请等待远程文件保存完成。', true); return; }
-  if (doc.dirty && !window.confirm('丢弃「' + basename(doc.path) + '」的未保存草稿？')) return;
+  try { await flushDraft(doc); } catch (error) { report(error); return; }
   removeDocument(id);
   if (active?.id === id) active = { kind: 'ssh', id: doc.session };
   render();
 }
 async function saveDocument(doc) {
   if (!doc?.dirty || doc.saving) return;
+  if (doc.conflict) { await compareDraft(doc); return; }
   if (doc.mixed && !window.confirm('此文件混用了 CRLF 与 LF 换行。保存时将统一为 LF，继续吗？')) return;
   const text = doc.input.value;
   doc.saving = true;
@@ -321,9 +347,13 @@ async function saveDocument(doc) {
     doc.textareaBase = text;
     doc.mixed = false;
     doc.dirty = doc.input.value !== text;
+    await flushDraft(doc);
     announce('已保存 ' + basename(doc.path));
     const session = sessions.get(doc.session);
     if (session && session.dir === dirname(doc.path)) navigate(session, session.dir);
+  } catch (error) {
+    if (/远程文件已修改/.test(error.message)) { doc.conflict = true; await flushDraft(doc); await compareDraft(doc); }
+    else throw error;
   } finally {
     doc.saving = false;
     renderEditor();
@@ -333,7 +363,7 @@ async function saveDocument(doc) {
 
 async function downloadRemote(session, remote) {
   const result = await api.download(session.id, remote);
-  if (result) announce(result.skipped ? '下载完成 · 跳过 ' + result.skipped + ' 个链接或不兼容的名称' : '下载完成');
+  reportQueued(result);
 }
 
 function showFileContext(event, session, item, remote) {
@@ -399,7 +429,10 @@ function wireFiles() {
         fileView.hidden = !fileView.hidden;
         const session = activeSession();
         if (session?.contextItem?.item && !fileVisible(session.contextItem.item)) session.contextItem = null;
-        if (session && !fileView.hidden && session.selected.startsWith('.')) session.selected = '';
+        if (session && !fileView.hidden) {
+          for (const name of session.selection || []) if (name.startsWith('.')) session.selection.delete(name);
+          if (session.selected.startsWith('.')) session.selected = [...session.selection || []].at(-1) || '';
+        }
         updateView();
       } },
       ...columns.filter(({ optional }) => optional).map(({ key, label }) => ({
@@ -486,19 +519,16 @@ function wireFiles() {
     try {
       if (!dir.startsWith('/')) throw new Error('请先打开一个远程目录。');
       $('upload').disabled = true;
-      const result = await api.upload(session.id, dir);
-      if (result.length) {
-        const failures = result.filter((item) => item.error);
-        announce(failures.length ? failures.map((item) => item.name + ' · ' + item.error).join('；')
-          : '已上传 ' + result.length + ' 个文件', Boolean(failures.length));
-        if (dir === session.dir) navigate(session, dir);
-      }
+      reportQueued(await api.upload(session.id, dir));
     } catch (error) { report(error); }
     finally { renderFiles(); }
   });
   $('download').onclick = () => withSession(async (session) => {
     try {
-      await downloadRemote(session, joinPath(session.dir, session.selected));
+      const names = session.selection?.size ? session.selection : new Set([session.selected]);
+      const paths = session.entries.filter((item) => names.has(item.name)
+        && (item.dir || item.regular || item.link)).map((item) => joinPath(session.dir, item.name));
+      if (paths.length) reportQueued(await api.download(session.id, paths));
     } catch (error) { report(error); }
   });
   const divider = $('pane-divider');

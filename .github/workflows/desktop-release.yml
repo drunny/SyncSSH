@@ -1,0 +1,108 @@
+name: Desktop release builds
+on:
+  push:
+    branches: ['release/v*']
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build and test ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: windows, runner: windows-2022, asset: '*.zip' }
+          - { platform: ubuntu, runner: ubuntu-24.04, asset: '*.deb' }
+          - { platform: macos, runner: macos-15, asset: '*.dmg' }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx install-electron
+      - run: npm test
+      - run: npm run package:desktop
+      - name: Test Windows ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $asset = Get-ChildItem -Recurse -File -Filter 'SyncSSH-v*-win32-*.zip' | Select-Object -First 1
+          $extract = Join-Path $env:RUNNER_TEMP 'syncssh-zip'
+          Expand-Archive -LiteralPath $asset.FullName -DestinationPath $extract
+          $env:SYNCSSH_TEST_EXECUTABLE = (Get-ChildItem $extract -Recurse -Filter SyncSSH.exe | Select-Object -First 1).FullName
+          npm run test:desktop
+      - name: Install and test Ubuntu package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package=$(find dist* -maxdepth 1 -name 'SyncSSH-v*-ubuntu-amd64.deb' -print -quit)
+          sudo apt-get install -y xvfb "$PWD/$package"
+          test "$(stat -c '%a %u' /opt/SyncSSH/chrome-sandbox)" = '4755 0'
+          SYNCSSH_TEST_EXECUTABLE=/opt/SyncSSH/syncssh xvfb-run -a npm run test:desktop
+      - name: Mount and test macOS preview
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          test "$(uname -m)" = arm64
+          image=$(find dist* -maxdepth 1 -name 'SyncSSH-v*-macos-arm64-preview.dmg' -print -quit)
+          volume="$RUNNER_TEMP/syncssh-dmg"
+          hdiutil verify "$image"
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$volume"
+          trap 'hdiutil detach "$volume"' EXIT
+          codesign --verify --deep --strict "$volume/SyncSSH.app"
+          SYNCSSH_TEST_EXECUTABLE="$volume/SyncSSH.app/Contents/MacOS/Electron" npm run test:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syncssh-${{ matrix.platform }}
+          path: dist*/${{ matrix.asset }}
+          if-no-files-found: error
+
+  ubuntu-newer:
+    name: Check same package on Ubuntu 26.04
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: syncssh-ubuntu
+          path: packages
+      - shell: bash
+        run: |
+          sudo apt-get install -y xvfb "$PWD"/packages/*.deb
+          SYNCSSH_TEST_EXECUTABLE=/opt/SyncSSH/syncssh xvfb-run -a node --test --test-name-pattern 'v1 desktop|v1.2' test/desktop.test.cjs
+
+  release-draft:
+    name: Prepare GitHub Release draft
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, ubuntu-newer]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: syncssh-*
+          path: packages
+          merge-multiple: true
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          test "v$(node -p 'require("./package.json").version')" = "$tag"
+          (cd packages && sha256sum *.zip *.deb *.dmg > SHA256SUMS.txt)
+          gh release create "$tag" packages/* --verify-tag --draft --title "SyncSSH $tag" --notes-file docs/release-v1.2.md

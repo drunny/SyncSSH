@@ -117,6 +117,7 @@ function account(mode) {
     closeDialog();
     workspace.inert = false;
     loadMonitors().catch(report);
+    refreshDrafts().catch(report);
     render();
   });
   showDialog(view);
@@ -533,7 +534,7 @@ async function openSession(entry, version, duplicate = false) {
 async function connectSession(session) {
   const { id, term } = session;
   try {
-    await api.connect(id, session.profileId, session.version);
+    session.route = await api.connect(id, session.profileId, session.version);
     if (!sessions.has(id) || session.status === '已断开') return;
     session.status = '已连接';
     session.connectedAt = Date.now();
@@ -575,12 +576,12 @@ function activate(kind, id) {
   if (kind === 'ssh') requestAnimationFrame(() => { if (active?.id === id) session.term.focus(); });
   else requestAnimationFrame(() => { if (active?.id === id) documents.get(id)?.input.focus(); });
 }
-function closeSession(id) {
+async function closeSession(id) {
   const session = sessions.get(id);
   if (!session) return;
   const dirty = [...documents.values()].filter((doc) => doc.session === id && (doc.dirty || doc.saving));
   if (dirty.some((doc) => doc.saving)) { announce('请等待远程文件保存完成。', true); return; }
-  if (dirty.length && !window.confirm('关闭会话并丢弃此会话的未保存文件草稿？')) return;
+  try { await Promise.all(dirty.map(flushDraft)); } catch (error) { report(error); return; }
   for (const doc of documents.values()) if (doc.session === id) removeDocument(doc.id);
   sessions.delete(id);
   session.term.dispose();
@@ -683,13 +684,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     session.term.writeln('\r\n[SyncSSH] ' + reason.replace(/[\u0000-\u001f\u007f-\u009f]/g, ''));
     render();
   });
-  api.on('before-close', () => {
+  api.on('before-close', async () => {
     if ([...documents.values(), ...noteDrafts.values()].some((item) => item.saving)) {
       announce('请等待保存完成。', true);
       return;
     }
-    if ([...documents.values(), ...noteDrafts.values()].some((item) => item.dirty)
+    if ([...noteDrafts.values()].some((item) => item.dirty)
       && !window.confirm('关闭 SyncSSH 并丢弃未保存草稿？')) return;
+    if ([...jobs.values()].some(activeTransfer) && !window.confirm('退出会停止进行中的传输。继续退出？')) return;
+    try { await flushFileDrafts(); } catch (error) { report(error); return; }
     api['force-close']();
   });
   $('add-group').onclick = () => groupDialog();
@@ -709,6 +712,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   wireNotes();
   wireDesktopTools();
   wireTerminalTools();
+  wireWorkspaceV12();
   try { account((await api.initialize()).exists ? 'unlock' : 'create'); }
   catch (error) {
     showDialog(el('p', error.message, 'error'));

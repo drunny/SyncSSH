@@ -17,6 +17,7 @@
   <script defer src="notes.js"></script>
   <script defer src="desktop-tools.js"></script>
   <script defer src="terminal-tools.js"></script>
+  <script defer src="workspace-v12.js"></script>
 </head>
 <body>
   <div id="workspace" inert>
@@ -66,6 +67,7 @@
           <div class="tabs-bar">
             <nav class="tabs" id="tabs" aria-label="会话标签"></nav>
             <button id="split" class="small" hidden>编辑器分屏</button>
+            <button id="drafts" class="small" title="恢复本机加密草稿">草稿</button>
             <button id="append" class="small" disabled>选区追加到备忘录</button>
           </div>
           <div class="clock-float">
@@ -85,7 +87,7 @@
             <div id="editor" hidden>
               <div class="editor-bar">
                 <span id="editor-title"></span>
-                <span class="editor-actions"><button id="save-file" class="primary small">保存</button><button id="close-file" class="small">关闭</button></span>
+                <span class="editor-actions"><button id="compare-draft" class="small" hidden>比较与另存</button><button id="save-file" class="primary small">保存</button><button id="close-file" class="small">关闭</button></span>
               </div>
               <div id="editor-buffers"></div>
             </div>
@@ -112,7 +114,7 @@
             <button id="mkdir">新建目录</button>
             <button id="mkfile">新建文件</button>
             <button id="upload">上传</button>
-            <button id="download">下载</button>
+            <button id="download" title="按住 Ctrl 或 ⌘ 可多选后下载">下载</button>
             <button id="sftp-more">更多</button>
             <button id="file-view" title="文件列表选项" aria-label="文件列表选项">视图 ▾</button>
             <input type="search" aria-label="搜索当前目录" id="file-search" placeholder="搜索当前目录">
@@ -123,6 +125,13 @@
               <table><thead><tr id="file-headings"></tr></thead><tbody id="file-rows"></tbody></table>
               <div id="file-message" class="empty muted">连接服务器后浏览远程文件。</div>
             </div>
+          </div>
+          <div class="transfer-dock">
+            <div id="transfer-body" hidden>
+              <div class="transfer-heading"><strong>传输队列</strong><button id="transfer-clear" class="small">清除已结束</button></div>
+              <div id="transfer-list"></div>
+            </div>
+            <button id="transfer-toggle" aria-expanded="false" aria-controls="transfer-body">传输</button>
           </div>
         </section>
       </div>

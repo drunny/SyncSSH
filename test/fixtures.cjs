@@ -343,6 +343,7 @@ async function sshFixture() {
       target: { username: 'fixture', auth: 'key', host: 'target.test.invalid', port: target.port, name: '跳板目标',
         privateKey: userKey.private, passphrase: 'test-key-only' }
     },
+    disconnectAll() { for (const connection of connections) connection._sock.destroy(); },
     close() {
       for (const timer of sampleTimers) clearInterval(timer);
       for (const connection of connections) connection._sock.destroy();

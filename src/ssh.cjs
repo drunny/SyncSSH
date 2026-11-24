@@ -21,7 +21,7 @@ class Sessions {
 
   async connect(id, profile, jump, { mode = 'session' } = {}) {
     if (this.sessions.has(id)) throw new Error('会话已经存在。');
-    const session = { id, clients: [], inflight: 0, mode };
+    const session = { id, clients: [], inflight: 0, mode, profile, jump };
     this.sessions.set(id, session);
     try {
       let socket;
@@ -133,7 +133,7 @@ class Sessions {
     const session = this.sessions.get(id);
     if (!session?.sftp) throw new Error('请先建立 SSH 会话。');
     const sftp = await session.sftp;
-    if (['create', 'rename', 'chmod', 'delete'].includes(operation) && (!remote.startsWith('/') || posix.normalize(remote).replace(/\/$/, '') === '')) {
+    if (['create', 'rename', 'chmod', 'delete', 'save-as'].includes(operation) && (!remote.startsWith('/') || posix.normalize(remote).replace(/\/$/, '') === '')) {
       throw new Error('请选择有效的远程路径。');
     }
     switch (operation) {
@@ -166,6 +166,21 @@ class Sessions {
         if (next.length > textLimit) throw new Error('文本编辑限 2 MiB。');
         await replaceFile(sftp, remote, next, attrs, options.revision);
         return hash(next);
+      }
+      case 'save-as': {
+        const data = Buffer.from(options.content, 'utf8');
+        if (data.length > textLimit) throw new Error('文本编辑限 2 MiB。');
+        const tmp = posix.join(posix.dirname(remote), '.syncssh-' + uuid() + '.part');
+        const handle = await call(sftp, 'open', tmp, 'wx', { mode: 0o600 });
+        try {
+          try { if (data.length) await call(sftp, 'write', handle, data, 0, data.length, 0); }
+          finally { await call(sftp, 'close', handle); }
+          await call(sftp, 'rename', tmp, remote);
+        } catch (error) {
+          await call(sftp, 'unlink', tmp).catch(() => {});
+          throw error;
+        }
+        return;
       }
       case 'mkdir':
         return call(sftp, 'mkdir', remote);
@@ -238,8 +253,8 @@ async function downloadDirectory(sftp, remote, local) {
   let skipped = 0;
   for (const { filename, attrs } of await call(sftp, 'readdir', remote)) {
     if (!validEntry(filename)) continue;
-    if (/[<>:"/\\|?*\x00-\x1f]/.test(filename) || /[. ]$/.test(filename)
-      || /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(filename)) {
+    if (process.platform === 'win32' && (/[<>:"/\\|?*\x00-\x1f]/.test(filename) || /[. ]$/.test(filename)
+      || /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(filename))) {
       skipped++;
       continue;
     }

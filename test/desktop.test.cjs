@@ -441,3 +441,57 @@ test('v1 desktop implements connection probes, server organization, host UI, rem
   await btn(page, '关闭提醒').click();
   t.after(() => fs.rm(temp, { recursive: true, force: true }).catch(() => {}));
 });
+
+test('v1.2 desktop queues a batch and restores an encrypted draft after restart with conflict copy', { timeout: 40000 }, async (t) => {
+  const ssh = await sshFixture();
+  t.after(ssh.close);
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'syncssh-v12-'));
+  const profilePath = path.join(temp, 'profile');
+  const download = path.join(temp, 'downloads');
+  await fs.mkdir(download);
+  ssh.direct.files.set('/home/extra.txt', { bytes: Buffer.from('extra') });
+  const first = await openDesktop(profilePath, t);
+  const p = first.page;
+  await p.locator('input[name=master]').fill(master);
+  await p.locator('input[name=confirm]').fill(master);
+  await btn(p, '创建仓库').click();
+  await profileForm(p, ssh.profiles.direct);
+  await connect(p, '直连主机');
+  await first.app.evaluate(({ dialog }, target) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] });
+  }, download);
+  await p.locator('#file-rows [title="readme.txt"]').click();
+  await p.locator('#file-rows [title="extra.txt"]').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] });
+  await btn(p, '下载').click();
+  await p.locator('#transfer-toggle').click();
+  await p.waitForFunction(() => document.querySelectorAll('#transfer-list .transfer-row').length === 2
+    && [...document.querySelectorAll('#transfer-list .transfer-state')].every((node) => node.textContent.startsWith('完成')));
+  assert.equal(await fs.readFile(path.join(download, 'extra.txt'), 'utf8'), 'extra');
+  assert.equal(await fs.readFile(path.join(download, 'readme.txt'), 'utf8'), 'direct text\n');
+
+  await p.locator('#file-rows [title="readme.txt"]').dblclick();
+  const draft = 'local unsaved text from v1.2';
+  await p.getByLabel('编辑 /home/readme.txt', exact).fill(draft);
+  await btn(p, '草稿 · 1').waitFor();
+  const encrypted = await fs.readFile(path.join(profilePath, 'vault.json'), 'utf8');
+  assert.ok(!encrypted.includes(draft));
+  await first.app.evaluate(({ app }) => { setTimeout(() => app.exit(0), 25); });
+  await p.waitForEvent('close');
+  ssh.direct.files.get('/home/readme.txt').bytes = Buffer.from('remote edited on another machine\n');
+
+  const second = await openDesktop(profilePath, t);
+  const restored = second.page;
+  await restored.locator('input[name=master]').fill(master);
+  await btn(restored, '解锁').click();
+  await btn(restored, '草稿 · 1').click();
+  await btn(restored, '恢复').click();
+  assert.equal(await restored.getByLabel('编辑 /home/readme.txt', exact).inputValue(), draft);
+  await btn(restored, '比较与另存').click();
+  assert.equal(await restored.getByLabel('远端现有内容', exact).inputValue(), 'remote edited on another machine\n');
+  await btn(restored, '另存为远程副本').click();
+  await restored.locator('#dialog button').filter({ hasText: /^保存$/ }).click();
+  await restored.locator('#dialog').waitFor({ state: 'hidden' });
+  assert.equal(ssh.direct.files.get('/home/readme.txt').bytes.toString(), 'remote edited on another machine\n');
+  assert.equal(ssh.direct.files.get('/home/readme.txt.copy').bytes.toString(), draft);
+  t.after(() => fs.rm(temp, { recursive: true, force: true }).catch(() => {}));
+});

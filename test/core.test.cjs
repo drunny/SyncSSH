@@ -8,6 +8,7 @@ const { setTimeout: wait } = require('node:timers/promises');
 const { Vault, index, uuid } = require('../src/vault.cjs');
 const { Dav, openRepository, synchronize, restore } = require('../src/dav.cjs');
 const { Sessions } = require('../src/ssh.cjs');
+const { TransferQueue } = require('../src/transfers.cjs');
 const { davFixture, sshFixture } = require('./fixtures.cjs');
 
 const master = 'a unique fixture master phrase';
@@ -164,4 +165,76 @@ test('two initial creators cannot replace the repository marker', { timeout: 100
   ]);
   assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
   assert.equal(dav.objects.size, 1);
+});
+
+test('queued SFTP jobs recover verified partial files, reject mismatches and avoid replacing destinations', { timeout: 25000 }, async (t) => {
+  const fixture = await sshFixture();
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'syncssh-queue-'));
+  const input = path.join(folder, 'input.bin');
+  const content = Buffer.alloc(780 * 1024);
+  for (let i = 0; i < content.length; i++) content[i] = i % 251;
+  await fs.writeFile(input, content);
+  let dropId;
+  let interruptedAt = 0;
+  let resumedAt = 0;
+  let observedWaiting = false;
+  let damage = false;
+  const queue = new TransferQueue({
+    trust: async (profile, fingerprint) => {
+      assert.equal(fingerprint, [fixture.direct, fixture.jump, fixture.target]
+        .find(({ port }) => profile.port === port).hostFingerprint);
+    },
+    emit: (job) => {
+      if (job.id !== dropId) return;
+      if (!interruptedAt && job.state === 'running' && job.done > 0) {
+        interruptedAt = job.done;
+        fixture.disconnectAll();
+      } else if (job.state === 'waiting') {
+        observedWaiting = true;
+        if (damage) {
+          const partial = fixture.direct.files.get(queue.jobs.get(job.id).part);
+          if (partial?.bytes.length) partial.bytes[0] ^= 0xff;
+        }
+      } else if (observedWaiting && job.state === 'running' && job.done > 0) resumedAt ||= job.done;
+    }
+  });
+  t.after(async () => {
+    queue.close();
+    fixture.close();
+    await fs.rm(folder, { recursive: true, force: true });
+  });
+  const direct = fixture.profiles.direct;
+  const state = (id) => queue.jobs.get(id)?.state;
+  const settle = async (id) => {
+    for (let i = 0; i < 380; i++) {
+      if (['complete', 'failed', 'canceled'].includes(state(id))) return state(id);
+      await wait(30);
+    }
+    assert.fail('unfinished transfer: ' + JSON.stringify(queue.snapshot()));
+  };
+  dropId = queue.add('upload', direct, null, '/home/upload.bin', input);
+  assert.equal(await settle(dropId), 'complete', JSON.stringify(queue.snapshot()));
+  assert.ok(observedWaiting && interruptedAt > 0 && resumedAt >= interruptedAt);
+  assert.deepEqual(fixture.direct.files.get('/home/upload.bin').bytes, content);
+
+  const destination = path.join(folder, 'download.bin');
+  interruptedAt = resumedAt = 0;
+  observedWaiting = false;
+  dropId = queue.add('download', direct, null, '/home/upload.bin', destination);
+  assert.equal(await settle(dropId), 'complete', JSON.stringify(queue.snapshot()));
+  assert.ok(observedWaiting && resumedAt >= interruptedAt);
+  assert.deepEqual(await fs.readFile(destination), content);
+
+  interruptedAt = resumedAt = 0;
+  observedWaiting = false;
+  damage = true;
+  dropId = queue.add('upload', direct, null, '/home/damaged.bin', input);
+  assert.equal(await settle(dropId), 'failed', JSON.stringify(queue.snapshot()));
+  assert.match(queue.jobs.get(dropId).message, /不一致/);
+  assert.equal(fixture.direct.files.has('/home/damaged.bin'), false);
+  await queue.change(dropId, 'cancel');
+
+  const blocked = queue.add('download', direct, null, '/home/readme.txt', destination);
+  assert.equal(await settle(blocked), 'failed');
+  assert.deepEqual(await fs.readFile(destination), content);
 });

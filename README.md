@@ -1,4 +1,4 @@
-# SyncSSH 1.0 - 带有 WebDAV 加密同步功能的 SSH 客户端
+# SyncSSH 1.2 - 带有 WebDAV 加密同步功能的 SSH 客户端
 
 > [中文](README.md) · [English](README.en.md) · [Français](README.fr.md) · [Русский](README.ru.md) · [Español](README.es.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Tiếng Việt](README.vi.md) · [ไทย](README.th.md)
 
@@ -35,6 +35,13 @@ Windows x64 便携版在 [Releases](../../releases) 页面下载。完整解压 
 首次启动时设置至少 12 个字符的主密码；它用于加密本地资料，不是 SSH 或 WebDAV 密码，请认真保管。
 
 点击“新建连接”，填写服务器地址、端口、SSH 用户名、密码或可导出的 SSH 私钥，以及分组、所在地和备注。需要跳板机时，先保存可直连的跳板连接，再在目标服务器中选择它。首次连接请核对 SHA-256 主机指纹；指纹变化时先确认服务器确实轮换了密钥。
+
+## v1.2 新功能
+
+- SFTP 文件可批量加入传输队列。按住 Ctrl 或 ⌘ 多选并下载。右下区「传输」默认折叠，展开后可查看进度、取消或重试普通文件传输。
+- 断线后会尝试重新连接。续传前重新检查源文件和已传部分。普通文件传输验证完成后才会发布目标文件。目录下载仍采用逐项下载。退出会停止活动任务。
+- 远程文件的未保存内容保存在本机加密仓库中。点击右上区「草稿」恢复。远端内容变化时可比较并另存远程副本，原文件不受影响。
+- Windows x64 ZIP、Ubuntu x64 DEB 和 Apple Silicon macOS 预览 DMG 使用同一个版本号。macOS 预览包未经 Apple 公证。
 
 ## WebDAV 加密同步
 
