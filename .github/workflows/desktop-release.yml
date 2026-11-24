@@ -15,7 +15,7 @@ jobs:
         include:
           - { platform: windows, runner: windows-2022, asset: '*.zip' }
           - { platform: ubuntu, runner: ubuntu-24.04, asset: '*.deb' }
-          - { platform: macos, runner: macos-15, asset: '*.dmg' }
+          - { platform: macos, runner: macos-26, asset: '*.dmg' }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
@@ -81,7 +81,9 @@ jobs:
           path: packages
       - shell: bash
         run: |
-          sudo apt-get install -y xvfb "$PWD"/packages/*.deb
+          package=$(find "$PWD/packages" -type f -name '*.deb' -print -quit)
+          test -n "$package"
+          sudo apt-get install -y xvfb "$package"
           SYNCSSH_TEST_EXECUTABLE=/opt/SyncSSH/syncssh xvfb-run -a node --test --test-name-pattern 'v1 desktop|v1.2' test/desktop.test.cjs
 
   release-draft:
@@ -104,5 +106,8 @@ jobs:
         run: |
           tag="$GITHUB_REF_NAME"
           test "v$(node -p 'require("./package.json").version')" = "$tag"
-          (cd packages && sha256sum *.zip *.deb *.dmg > SHA256SUMS.txt)
-          gh release create "$tag" packages/* --verify-tag --draft --title "SyncSSH $tag" --notes-file docs/release-v1.2.md
+          if gh release view "$tag" >/dev/null 2>&1; then exit 0; fi
+          mkdir release-assets
+          find packages -type f \( -name '*.zip' -o -name '*.deb' -o -name '*.dmg' \) -exec cp -n {} release-assets/ \;
+          (cd release-assets && sha256sum *.zip *.deb *.dmg > SHA256SUMS.txt)
+          gh release create "$tag" release-assets/* --verify-tag --draft --title "SyncSSH $tag" --notes-file docs/release-v1.2.md
